@@ -1,0 +1,5 @@
+dist/
+node_modules/
+temp_test_migrations/
+coverage/
+*.js

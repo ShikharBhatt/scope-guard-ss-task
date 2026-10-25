@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: scope-guard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_DB: ${DATABASE_NAME:-scope_guard}
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scope-guard-api
+    restart: unless-stopped
+    environment:
+      SERVICE_MODE: api
+      PORT: 3000
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_NAME: ${DATABASE_NAME:-scope_guard}
+      DATABASE_SSL: "false"
+      DATABASE_URL: "postgresql://${DATABASE_USER:-postgres}:${DATABASE_PASSWORD:-postgres}@postgres:5432/${DATABASE_NAME:-scope_guard}?schema=public"
+      NODE_ENV: production
+      LOG_LEVEL: info
+    ports:
+      - "${PORT:-3000}:3000"
+    command: ["sh", "-c", "node dist/database/run-migrations.js && node dist/database/seed.js && node dist/main.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scope-guard-proxy
+    restart: unless-stopped
+    environment:
+      SERVICE_MODE: proxy
+      PROXY_PORT: 3128
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      DATABASE_NAME: ${DATABASE_NAME:-scope_guard}
+      DATABASE_SSL: "false"
+      DATABASE_URL: "postgresql://${DATABASE_USER:-postgres}:${DATABASE_PASSWORD:-postgres}@postgres:5432/${DATABASE_NAME:-scope_guard}?schema=public"
+      ALLOW_LOCAL_MOCK_TARGETS: "true"
+      NODE_ENV: production
+      LOG_LEVEL: info
+    ports:
+      - "${PROXY_PORT:-3128}:3128"
+    command: ["node", "dist/main.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

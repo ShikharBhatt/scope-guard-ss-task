@@ -1,0 +1,118 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Tenant {
+  id           String         @id
+  name         String
+  createdAt    DateTime       @default(now()) @map("created_at")
+  apiKeys      TenantApiKey[]
+  engagements  Engagement[]
+  auditRecords AuditRecord[]
+
+  @@map("tenants")
+}
+
+model TenantApiKey {
+  id        String    @id
+  tenantId  String    @map("tenant_id")
+  name      String
+  keyHash   String    @unique @map("key_hash")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+  @@map("tenant_api_keys")
+}
+
+model Engagement {
+  id                String             @id
+  tenantId          String             @map("tenant_id")
+  name              String
+  status            String             @default("ACTIVE")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  revokedAt         DateTime?          @map("revoked_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workerCredentials WorkerCredential[]
+  targets           EngagementTarget[]
+  auditRecords      AuditRecord[]
+
+  @@unique([id, tenantId], name: "uq_engagement_tenant")
+  @@index([tenantId])
+  @@map("engagements")
+}
+
+model WorkerCredential {
+  id           String     @id
+  engagementId String     @map("engagement_id")
+  secretHash   String     @unique @map("secret_hash")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([secretHash])
+  @@map("worker_credentials")
+}
+
+model EngagementTarget {
+  id               String   @id
+  engagementId     String   @map("engagement_id")
+  normalizedTarget String   @map("normalized_target")
+  effect           String
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@unique([engagementId, normalizedTarget], name: "uq_engagement_target")
+  @@index([engagementId, normalizedTarget])
+  @@map("engagement_targets")
+}
+
+model AuditRecord {
+  id              String        @id
+  timestamp       DateTime      @default(now()) @map("timestamp")
+  tenantId        String        @map("tenant_id")
+  engagementId    String        @map("engagement_id")
+  requestId       String        @map("request_id")
+  method          String
+  target          String
+  decision        String
+  reason          String
+  upstreamStatus  Int?          @map("upstream_status")
+  upstreamOutcome String?       @map("upstream_outcome")
+  durationMs      Int?          @map("duration_ms")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  engagement   Engagement    @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  outboxEvents AuditOutbox[]
+
+  @@index([engagementId, timestamp(sort: Desc)])
+  @@index([tenantId, timestamp(sort: Desc)])
+  @@map("audit_records")
+}
+
+model AuditOutbox {
+  id            String    @id
+  auditRecordId String    @map("audit_record_id")
+  payload       Json
+  status        String    @default("PENDING")
+  retryCount    Int       @default(0) @map("retry_count")
+  nextRetryAt   DateTime  @default(now()) @map("next_retry_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  lastError     String?   @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  auditRecord AuditRecord @relation(fields: [auditRecordId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextRetryAt])
+  @@map("audit_outbox")
+}
+
